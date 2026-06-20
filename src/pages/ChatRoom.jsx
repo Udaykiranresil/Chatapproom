@@ -15,8 +15,6 @@ function formatRoomCode(code = "") {
 }
 
 function groupMessages(messages) {
-  // Group consecutive messages from the same sender so we only show the
-  // avatar / sender indicator on the last bubble in each run.
   const groups = [];
   messages.forEach((msg, i) => {
     const prev = messages[i - 1];
@@ -187,7 +185,6 @@ export default function ChatRoom({ room, userId, participantIds }) {
           setMessages((curr) =>
             curr.some((m) => m.id === payload.new.id) ? curr : [...curr, payload.new]
           );
-          // If the new message is from the partner and we're scrolled up, count it
           if (payload.new.sender_id !== userId) {
             setUnreadCount((n) => n + 1);
           }
@@ -207,7 +204,6 @@ export default function ChatRoom({ room, userId, participantIds }) {
     if (messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     const isOwnMessage = lastMsg?.sender_id === userId;
-    // Always scroll for own messages; only auto-scroll for partner if at bottom
     if (isOwnMessage || isAtBottom) {
       scrollToBottom(loadingHistory ? "instant" : "smooth");
     }
@@ -277,9 +273,16 @@ export default function ChatRoom({ room, userId, participantIds }) {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="relative h-screen flex flex-col overflow-hidden bg-void">
+    /*
+      KEY FIX 1: h-dvh instead of h-screen
+      - h-screen = 100vh, which on mobile ignores the browser address bar,
+        causing the layout to overflow and the input to be hidden.
+      - h-dvh = 100dvh, which dynamically adjusts as the browser chrome
+        shows/hides — keeps everything perfectly within the visible viewport.
+    */
+    <div className="relative h-dvh flex flex-col overflow-hidden bg-void">
 
-      {/* ── Header ── */}
+      {/* ── Header — shrink-0 keeps it fixed height, never squished ── */}
       <header className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-glass-border bg-surface/70 backdrop-blur-xl z-10">
         <div className="flex items-center gap-3 min-w-0">
           <TwinOrbit connected size={34} />
@@ -316,17 +319,37 @@ export default function ChatRoom({ room, userId, participantIds }) {
         </button>
       </header>
 
-      {/* ── Offline banner ── */}
+      {/* ── Offline banner — shrink-0 so it doesn't flex-grow ── */}
       <AnimatePresence>
-        {!partnerOnline && !loadingHistory && <OfflineBanner />}
+        {!partnerOnline && !loadingHistory && (
+          <div className="shrink-0">
+            <OfflineBanner />
+          </div>
+        )}
       </AnimatePresence>
 
-      {/* ── Messages area ── */}
+      {/*
+        KEY FIX 2: Messages area
+        - "flex-1 min-h-0" on the outer wrapper:
+            flex-1   → takes all remaining vertical space between header and input
+            min-h-0  → critical! without this, a flex child ignores its parent's
+                        height constraint and can overflow. This is what allows
+                        overflow-y-auto to actually activate on the inner div.
+        - "relative" stays for the scroll-to-bottom button positioning.
+      */}
       <div className="relative flex-1 min-h-0">
+
+        {/*
+          KEY FIX 3: Scroll container
+          - "h-full overflow-y-auto" — fills the flex parent and scrolls internally.
+            This works correctly now because min-h-0 is set on the parent above.
+          - overscroll-contain — prevents the scroll from bubbling up to the page
+            on mobile (rubber-band / bounce effect that can feel janky).
+        */}
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-full overflow-y-auto px-4 sm:px-6 py-5 scroll-smooth"
+          className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6 py-5 scroll-smooth"
         >
           {loadingHistory ? (
             <div className="h-full flex flex-col items-center justify-center gap-3">
@@ -367,8 +390,14 @@ export default function ChatRoom({ room, userId, participantIds }) {
         </div>
       </div>
 
-      {/* ── Chat input ── */}
-      <div className="shrink-0">
+      {/*
+        KEY FIX 4: Input bar
+        - shrink-0 — prevents the input from being squished when space is tight.
+        - pb-safe — applies env(safe-area-inset-bottom) padding so the input
+          is never hidden behind the iPhone home indicator or Android nav bar.
+          Requires adding this to your Tailwind config (see note below).
+      */}
+      <div className="shrink-0 pb-safe">
         <ChatInput
           onSendText={(text) => sendMessage("text", text)}
           onSendEmoji={(emoji) => sendMessage("emoji", emoji)}
@@ -387,3 +416,40 @@ export default function ChatRoom({ room, userId, participantIds }) {
     </div>
   );
 }
+
+/*
+  ─── TAILWIND CONFIG ADDITIONS ──────────────────────────────────────────────
+
+  Add these to your tailwind.config.js to enable the fixes used above:
+
+  // tailwind.config.js
+  module.exports = {
+    theme: {
+      extend: {
+        height: {
+          dvh: "100dvh",   // enables h-dvh (dynamic viewport height)
+        },
+        padding: {
+          safe: "env(safe-area-inset-bottom)",  // enables pb-safe for iOS notch
+        },
+      },
+    },
+  };
+
+  ─── GLOBAL CSS ADDITIONS ───────────────────────────────────────────────────
+
+  Add this to your globals.css / index.css to ensure the viewport
+  meta tag is respected and scrolling doesn't feel sluggish on iOS:
+
+  html, body {
+    height: 100%;
+    overscroll-behavior: none;       // prevents pull-to-refresh interfering
+    -webkit-overflow-scrolling: touch; // smooth momentum scrolling on iOS
+  }
+
+  Also make sure your index.html has this meta tag:
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+                                                                        ^^^^^^^^^^^^^^^^^^^
+                                    "viewport-fit=cover" is required for
+                                    env(safe-area-inset-bottom) to work on iOS.
+*/
