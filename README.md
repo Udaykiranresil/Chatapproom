@@ -104,3 +104,4 @@ src/
 supabase/
   schema.sql       tables, capacity trigger, RLS policies, realtime setup
 ```
+"# Chatapproom" 
